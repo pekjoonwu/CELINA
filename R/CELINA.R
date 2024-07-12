@@ -555,7 +555,9 @@ Celina_kernel <- function(location, basis_number = 4) {
   ## Add in the spline basis kernels
   center_coords <- sweep(location, 2, apply(location, 2, mean), '-')
   center_coords <- as.data.frame(center_coords / sd(as.matrix(center_coords)))
-  sm <- mgcv::smoothCon(mgcv::s(x, y, k = basis_number, fx = T, bs = 'tp'), data = center_coords)[[1]]
+  colnames(center_coords) <- c("x", "y")
+  sm <- mgcv::smoothCon(mgcv::s(x, y, 
+    k = basis_number, fx = T, bs = 'tp'), data = center_coords)[[1]]
   mm <- as.matrix(data.frame(sm$X))
   mm_inv <- solve(crossprod(mm, mm))
   spline_kernels <- list(mm %*% mm_inv %*% t(mm))
