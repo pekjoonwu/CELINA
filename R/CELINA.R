@@ -1,7 +1,7 @@
 #####################################################################
 # Package: Celina
 # Version: 1.0.0
-# Date : 2023-7-19
+# Date : 2024-7-11
 ######################################################################
 
 ##########################################################
@@ -532,70 +532,37 @@ bandwidth_select <- function (expr, method = "Silverman") {
 #' @title Construct the kernel matrix
 #' @description This function construct the kernel matrices in a list.
 #' @param location Cell/spot spatial coordinates to compute the kernel matrix.
+#' @param basis_number Number of spline functions to construct non parametric covariance matrix
 #' @return A list with 11 pre-calculated kernels
-Celina_kernel <- function(location) {
-  ## Follow SPARKX paper to construct the linear kernels
-  transloc_func <- function(coord, lker, transfunc = "gaussian"){
-    coord <- scale(coord,scale = F)
-    l <- stats::quantile(abs(coord), probs = seq(0.2, 1, by = 0.2))
-    if (transfunc == "gaussian") {
-      out <- exp(-coord ^ 2/(2 * l[lker]^2))
-    } else if(transfunc == "cosine"){
-      out <- cos(2 * pi * coord/l[lker])
-    }
-    return(out)
-  }
+Celina_kernel <- function(location, basis_number = 4) {
+  ## Calculate the Euclidean distance matrix
+  ED <- as.matrix(dist(location[ , 1:2]))
   
-  transformed_location <- lapply(1:10, function(x) {
-    if (x %in% 1:5) {
-      kernel_type <- "gaussian"
-      return(apply(location, 2, transloc_func, 
-                   lker = x, transfunc = kernel_type))
-    } else {
-      kernel_type <- "cosine"
-      return(apply(location, 2, transloc_func, 
-                   lker = x - 5, transfunc = kernel_type))
-    }
-  })  
-  
-  transformed_location_list <- lapply(1:length(transformed_location), function(x) {
-    Xinfomat <- apply(transformed_location[[x]], 2, scale, scale = FALSE)
-    loc_inv <- solve(crossprod(Xinfomat, Xinfomat))
+  kernels_list <- list()
+  lrang <- quantile(abs(location), probs = seq(0.2, 1, by = 0.2))
+  for(ikernel in c(1:5) ){
+    ## Gaussian kernel
+    kernel_mat <- exp(-ED ^ 2/(2 * lrang[ikernel] ^ 2))
+    kernels_list <- c(kernels_list, list(kernel_mat))
+    rm(kernel_mat)
     
-    return(Xinfomat %*% loc_inv %*% t(Xinfomat))
-  })
+    ## matern kernels
+    kernel_mat <- fields::Matern(d = ED, range = 1, alpha = lrang[ikernel], smoothness = 1.5)
+    kernels_list <- c(kernels_list, list(kernel_mat))
+    rm(kernel_mat)
+  }# end for ikernel
   
-  ## Add in the original projection kernels
-  Xinfomat <- apply(location, 2, scale, scale = FALSE)
-  loc_inv <- solve(crossprod(Xinfomat, Xinfomat))
-  projection_kernels <- list(Xinfomat %*% loc_inv %*% t(Xinfomat))
+  ## Add in the spline basis kernels
+  center_coords <- sweep(location, 2, apply(location, 2, mean), '-')
+  center_coords <- as.data.frame(center_coords / sd(as.matrix(center_coords)))
+  sm <- mgcv::smoothCon(mgcv::s(x, y, k = basis_number, fx = T, bs = 'tp'), data = center_coords)[[1]]
+  mm <- as.matrix(data.frame(sm$X))
+  mm_inv <- solve(crossprod(mm, mm))
+  spline_kernels <- list(mm %*% mm_inv %*% t(mm))
   
   ## Final output kernels
-  output_kernels <- c(transformed_location_list, projection_kernels)
+  output_kernels <- c(kernels_list, spline_kernels)
   return(output_kernels)
-}
-
-#' @title Construct the kernel matrix used by davies p-value calculation
-#' @description This function construct the kernel matrices to be used in the davies p-value calculation in a list.
-#' @param kernels_list Pre-computed kernel matrices.
-#' @return A list with 11 new kernels
-Celina_kernel_davies <- function(kernels_list) {
-  ## SVD on different kernel matrices for the first two eigen values
-  svd_results <- lapply(kernels_list, function(x) {
-    return(RSpectra::eigs_sym(x, k = 2))})
-  
-  ## Normalize the eigen decomposition constructed kernels
-  normalize_kernels_diag <- function(kernels) {
-    k_norm_diag <- 1/sqrt(diag(kernels))
-    # kernels <- kernels * (k_norm_diag %*% t(k_norm_diag))
-    return(k_norm_diag)
-  }
-  newkernels_normalized_diag <- lapply(kernels_list, normalize_kernels_diag)
-  U_list <- lapply(1:11, function(x) {
-    return(svd_results[[x]]$vectors %*% sqrt(diag(svd_results[[x]]$values)) * newkernels_normalized_diag[[x]])
-  })
-  
-  return(U_list)
 }
 
 
@@ -606,24 +573,16 @@ Celina_kernel_davies <- function(kernels_list) {
 #' @param object The SVC object.
 #' @param kernel_mat A list of optional kernel matrix to do the testing, 
 #' otherwise used previous calculated kernels
-#' @param method The procedure of calculating the pvalues for each kernel, 
-#' either by 'MM' - matching moments or by 'davies' - davies method
 #' @param celltype_to_test Cell types selected for testing
 #' @param num_cores The number of cores used in calculation
 #' @return A CELINA object with calculated testing results recorded
 #' @export
 Testing_interaction_all <- function(object, kernel_mat = NULL, 
-                                                  method = "MM",
                                                   celltype_to_test = NULL,
                                                   num_cores) {
   ## Replace the kernel matrices by the user provided kernel_mat
   if (!is.null(kernel_mat)) {
     object@kernelmat <- kernel_mat
-  }
-  
-  ## Run the eigen decomposition if the method is davies
-  if (method == "davies") {
-    object@kernelmat <- Celina_kernel_davies(object@kernelmat)
   }
   
   object@result <- list()
@@ -654,20 +613,11 @@ Testing_interaction_all <- function(object, kernel_mat = NULL,
     ## Run different algorithms based on the approximation
     if (object@approximation == FALSE) {
       ## Run the default 11 kernels algorithm
-      ## Run different pvalue calculation procedure based on method
-      if (method == "MM") {
-        pvalues_results <- pbmcapply::pbmclapply(1:nrow(combinations), 
+      pvalues_results <- pbmcapply::pbmclapply(1:nrow(combinations), 
                            function(i) {Testing_interaction_multi_kernels(target_normalized_counts[combinations[i, 2], ],
-                                                                          object@celltype_mat[combinations[i, 1], ], method = "MM",
+                                                                          object@celltype_mat[combinations[i, 1], ],
                                                                           covariates = object@covariates, kernel_mat = object@kernelmat)},  
                            mc.cores = num_cores)
-      } else {
-        pvalues_results <- pbmcapply::pbmclapply(1:nrow(combinations), 
-                           function(i) {Testing_interaction_multi_kernels(target_normalized_counts[combinations[i, 2], ],
-                                                                          object@celltype_mat[combinations[i, 1], ], method = "davies",
-                                                                          covariates = object@covariates, kernel_mat = object@kernelmat)},  
-                           mc.cores = num_cores)
-      }
       
       pvalues_results <- as.data.frame(do.call(rbind, pvalues_results))
       rownames(pvalues_results) <- gene_names
@@ -773,12 +723,10 @@ Testing_interaction <- function(Y, X, covariates, kernelmat_approx_U) {
 #' @param X celltype proportion for testing 
 #' @param covariates covariates for the null model
 #' @param kernel_mat A list of kernel matrix to do the testing
-#' @param method The procedure of calculating the pvalues for each kernel, 
 #' either by 'MM' - matching moments or by 'davies' - davies method
-#' 
 #' @export
 
-Testing_interaction_multi_kernels <- function(Y, X, covariates, kernel_mat, method) {
+Testing_interaction_multi_kernels <- function(Y, X, covariates, kernel_mat) {
   ##------------------------
   ## Fit NULL model using REML + AI algorithm
   ##------------------------
@@ -810,11 +758,7 @@ Testing_interaction_multi_kernels <- function(Y, X, covariates, kernel_mat, meth
   converged   <- model1$converged
   
   ## Testing each kernel based on the null model
-  if (method == "MM") {
-    test_results <- Celina_test(model1, kernel_mat = kernel_mat)
-  } else {
-    test_results <- Celina_test_davies(model1, kernel_mat = kernel_mat)
-  }
+  test_results <- Celina_test(model1, kernel_mat = kernel_mat)
 
   ## Return the results
   return(test_results)
@@ -860,7 +804,7 @@ Celina_test <- function(model1,
                                             precal_list = precal_list)
     res_pval <- cbind(res_pval, test_results)
   }
-  colnames(res_pval) <- c(paste0("Gaussian", 1:5), paste0("Periodic", 1:5), "Projection")
+  colnames(res_pval) <- c(paste0("Gaussian", 1:5), paste0("Matern", 1:5), "Spline")
   
   combined_pvalue <- ACAT(res_pval)
   pvals_results <- cbind(res_pval, combined_pvalue)
@@ -901,68 +845,6 @@ Celina_test_each_kernel <- function(model1, kernel_mat_each,
   
   ## Return the pvalues
   return(pvs_raw)
-}
-
-#' @title Testing multiple kernel matrices
-#' 
-#' @param model1 Celina fitted null models with parameters
-#' @param kernel_mat A list to store the pre-defined kernel matrix, 
-#' @param check_positive Check the kernel matrix is positive or not
-Celina_test_davies <- function(model1,
-                        kernel_mat = NULL, 
-                        check_positive = TRUE) {
-  
-  ## Check the kernel matrix first
-  if (!is.null(kernel_mat) & !is.list(kernel_mat)) { 
-    stop("kernel_mat must be a list consisted of different spatial kernel matrices")
-  }
-  
-  res_pval <- NULL
-  
-  ## H inverse 
-  sigma_r2 <- model1$theta[2]
-  sigma_e2 <- model1$theta[3]
-  H <- sigma_r2 * (model1$X ^ 2) + sigma_e2
-  Hinv <- 1/(H + 1e-5)
-  HinvW <- apply(model1$W, 2, function(i){return(i * Hinv)})
-  WtHinvW <- t(model1$W) %*% HinvW
-  WtHinvW_inv <- solve(WtHinvW)
-  HinvW_WtHinvW_inv <- (HinvW %*% WtHinvW_inv)
-  ## P matrix
-  P <- - HinvW_WtHinvW_inv %*% t(HinvW)
-  diag(P) <- diag(P) + Hinv
-  
-  ## 5 gaussian and 5 periodic kernels - default
-  for (ikernel in 1:11) {
-    #####
-    ## Do davies method testing for each kernel U
-    #####
-    y <- model1$Y
-    XUk <- c(model1$X) * kernel_mat[[ikernel]]
-    U <- sqrt(1/2) * (H ^ 0.5) * (P %*% XUk)
-    Q <- U %*% t(U)
-    
-    statistics <- as.numeric(crossprod(y * (H ^ -0.5), Q) %*% (y * (H ^ -0.5)))
-    e <- eigen(t(U) %*% U)
-    lambda <- sort(e$values, decreasing = TRUE)
-    
-    r1 <- CompQuadForm::davies(statistics, lambda, h = rep(1, length(lambda)),
-                               delta = rep(0, length(lambda)), sigma = 0, lim = 10000)
-    pvalue_b <- r1$Qq
-    if (pvalue_b <= 0) {
-      pvalue_b <- CompQuadForm::liu(statistics, lambda)
-    }
-    res_pval <- cbind(res_pval, pvalue_b)
-  }
-  
-  colnames(res_pval) <- c(paste0("Gaussian", 1:5), paste0("Periodic", 1:5), "Projection")
-  
-  combined_pvalue <- ACAT(res_pval)
-  pvals_results <- cbind(res_pval, combined_pvalue)
-  colnames(pvals_results)[ncol(pvals_results)] <- "CombinedPvals"
-  
-  ## return the results
-  return(pvals_results)
 }
 
 ##########################################################
@@ -1079,7 +961,6 @@ ACAT <- function(Pvals, Weights=NULL){
   }else{
     Weights<-Weights/sum(Weights)
   }
-  
   
   #### check if there are very small non-zero p values
   is.small<-(Pvals<1e-16)
