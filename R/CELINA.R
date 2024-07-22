@@ -540,7 +540,7 @@ Celina_kernel <- function(location, basis_number = 4) {
   
   kernels_list <- list()
   lrang <- quantile(abs(location), probs = seq(0.2, 1, by = 0.2))
-  for(ikernel in c(1:5) ){
+  for (ikernel in c(1:5)) {
     ## Gaussian kernel
     kernel_mat <- exp(-ED ^ 2/(2 * lrang[ikernel] ^ 2))
     kernels_list <- c(kernels_list, list(kernel_mat))
@@ -592,7 +592,8 @@ Testing_interaction_all <- function(object, kernel_mat = NULL,
   ## Subset the cell type proportion matrix for remaining cell types
   celltype_mat <- t(object@celltype_mat[names(object@genes_list), ])
   celltype_mat <- sweep(celltype_mat, 1, rowSums(celltype_mat), "/")
-  celltype_mat <- t(celltype_mat)
+  object@celltype_mat <- t(celltype_mat)
+  
   if (is.null(celltype_to_test)) {
     celltype_to_test <- rownames(object@celltype_mat)
   }
