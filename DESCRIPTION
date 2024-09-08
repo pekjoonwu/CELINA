@@ -27,7 +27,10 @@ Imports:
     RSpectra (>= 0.16.1),
     scater (>= 1.28.0),
     stats (>= 4.3.3),
-    tidyr (>= 1.3.0)
+    tidyr (>= 1.3.0),
+    RSpectra (>= 0.16-2),
+    fields (>= 16.2),
+    mgcv (>= 1.9-1)
 LinkingTo: 
     Rcpp,
     RcppArmadillo
