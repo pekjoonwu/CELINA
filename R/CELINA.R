@@ -60,8 +60,13 @@ Create_Celina_Object <- function(celltype_mat = NULL,
                               project = "Celina"){
   
   ## check dimension
-  if (ncol(celltype_mat) != nrow(location) & ncol(gene_expression_mat) != nrow(location)) {
+  if (ncol(celltype_mat) != nrow(location) | ncol(gene_expression_mat) != nrow(location)) {
     stop ("The number of columns in two matrices, and the number of locations should be consistent.")
+  } # end fi
+
+  ## check names
+  if (any(colnames(celltype_mat) != rownames(location)) | any(colnames(gene_expression_mat) != rownames(location))) {
+    stop ("The cells/spots names should match between celltype matrix, gene expression matrix and location matrix")
   }# end fi
   
   ## inheriting
@@ -371,6 +376,7 @@ Calculate_Kernel <- function(object,
   } else {
     ## Alternative - 1 kernels with approximation 
     object@approximation <- TRUE
+    sparseKernel <- TRUE
     ## Select the bandwidth for the approximation kernel
     if (is.null(bandwidth.set.by.user) & is.null(bandwidthtype)) {
       stop("Please specify a bandwidth for kernel matrix, or specify a bandwidthtype and 
@@ -593,6 +599,8 @@ Testing_interaction_all <- function(object, kernel_mat = NULL,
   celltype_mat <- t(object@celltype_mat[names(object@genes_list), ])
   celltype_mat <- sweep(celltype_mat, 1, rowSums(celltype_mat), "/")
   object@celltype_mat <- t(celltype_mat)
+
+  ## Remove the cells from the cell types that have been filtered out for single cell resolution
   
   if (is.null(celltype_to_test)) {
     celltype_to_test <- rownames(object@celltype_mat)

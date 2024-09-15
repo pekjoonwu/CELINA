@@ -30,7 +30,8 @@ Imports:
     tidyr (>= 1.3.0),
     RSpectra (>= 0.16-2),
     fields (>= 16.2),
-    mgcv (>= 1.9-1)
+    mgcv (>= 1.9-1),
+    dplyr (>= 1.1.4)
 LinkingTo: 
     Rcpp,
     RcppArmadillo

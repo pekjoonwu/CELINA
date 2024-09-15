@@ -1,5 +1,6 @@
 useDynLib(CELINA, .registration=TRUE)
 importFrom(Rcpp, evalCpp)
+importFrom(dplyr, `%>%`)
 export(Create_Celina_Object)
 export(preprocess_input)
 export(get_cell_type_gene_list)
