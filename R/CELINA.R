@@ -46,6 +46,7 @@ setClass("Celina", slots = list(
 #' normalizeCounts normalization in Scater R package.
 #' @param location Spatial location matrix (matrix), the dimension is n x d, n is the number of locations, d is dimensin of spatial coordinates, 
 #' e.g. d = 2 for locations on 2D space. The rownames of locations and the colnames of count matrix should be matched.
+#' @param scaling_method Two options to scale spatial location information: separate scaling ("separate"); joint scaling ("joint")  
 #' @param covariates The covariates in experiments (matrix, if any covariates included), n x q, 
 #' n is the number of locations, q is the number of covariates. 
 #' The rownames of covariates and the rownames of locations should be matched.
@@ -56,6 +57,7 @@ setClass("Celina", slots = list(
 Create_Celina_Object <- function(celltype_mat = NULL, 
                               gene_expression_mat = NULL, 
                               location = NULL,
+                              scaling_method = "separate",
                               covariates = NULL,
                               project = "Celina"){
   
@@ -96,7 +98,14 @@ Create_Celina_Object <- function(celltype_mat = NULL,
   }
   
   object@result <- list()
-  object@location <- scale(object@location)
+  if (scaling_method == "separate") {
+    object@location <- scale(object@location)
+  } else if (scaling_method == "joint") {
+    scale_vals <- max(location) - min(location)
+    object@location[, 1] <- (location[, 1] - min(location))/scale_vals
+    object@location[, 2] <- (location[, 2] - min(location))/scale_vals
+  }
+  
   
   ## Return created object
   return(object)
